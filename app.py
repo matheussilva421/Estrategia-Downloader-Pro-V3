@@ -940,33 +940,59 @@ class StrategyDownloaderApp(ctk.CTk):
             except Exception as e:
                 pass
 
-    def _create_download_item(self, file_name):
-        """Cria item na lista de downloads"""
-        item = ctk.CTkFrame(self.downloads_list, fg_color="#2b2b2b")
-        item.pack(fill="x", padx=5, pady=5)
+    async def _create_download_item(self, file_name):
+        """Cria item na lista de downloads (Layout Compacto)"""
+        # Executa na thread principal se necessário
+        if threading.current_thread() is not threading.main_thread():
+             self.after(0, lambda: self._create_download_item_sync(file_name))
+        else:
+             self._create_download_item_sync(file_name)
+
+    def _create_download_item_sync(self, file_name):
+        """Implementação síncrona da criação do item"""
+        if file_name in self.active_downloads:
+            return
+
+        item = ctk.CTkFrame(self.downloads_list, fg_color="#2b2b2b", corner_radius=6)
+        item.pack(fill="x", padx=5, pady=4) # Menos espaçamento vertical
         
-        # Título truncado
+        # Grid layout para o item
+        item.grid_columnconfigure(0, weight=1)
+        item.grid_rowconfigure(1, weight=1)
+        
+        # --- LINHA 1: Cabeçalho (Nome + Status) ---
+        header_frame = ctk.CTkFrame(item, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 2))
+        header_frame.grid_columnconfigure(0, weight=1)
+        
+        # Ícone + Nome
+        icon = "📄" if ".pdf" in file_name.lower() else "🎥"
+        display_name = file_name if len(file_name) < 60 else file_name[:57] + "..."
+        
         name_label = ctk.CTkLabel(
-            item, 
-            text=file_name if len(file_name) < 50 else file_name[:47] + "...",
+            header_frame, 
+            text=f"{icon}  {display_name}",
             anchor="w",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#FFFFFF"
         )
-        name_label.pack(fill="x", padx=10, pady=(5,0))
+        name_label.grid(row=0, column=0, sticky="w")
         
-        # Barra
-        progress = ctk.CTkProgressBar(item, height=10)
-        progress.set(0)
-        progress.pack(fill="x", padx=10, pady=5)
-        
-        # Status
+        # Status (Velocidade/Tamanho) - Alinhado à direita
         status_label = ctk.CTkLabel(
-            item,
+            header_frame,
             text="Iniciando...",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
+            font=ctk.CTkFont(size=11, family="Consolas"), # Fonte monoespaçada para números
+            text_color="#AAAAAA"
         )
-        status_label.pack(anchor="e", padx=10, pady=(0,5))
+        status_label.grid(row=0, column=1, sticky="e")
+        
+        # --- LINHA 2: Barra de Progresso ---
+        # Barra mais fina (height=6)
+        progress = ctk.CTkProgressBar(item, height=6, corner_radius=3)
+        progress.set(0)
+        progress.grid(row=1, column=0, sticky="ew", padx=10, pady=(2, 8))
+        progress.configure(progress_color="#00BFA5") # Cor de destaque (Teal/Verde)
         
         self.active_downloads[file_name] = {
             "frame": item,
