@@ -108,14 +108,22 @@ class DownloadManager:
             success_count = 0
             failed_count = 0
             
-            for i, course_url in enumerate(course_urls, 1):
+            for i, course_item in enumerate(course_urls, 1):
+                # Extrai URL e Título (suporte a dict e str)
+                if isinstance(course_item, dict):
+                    course_url = course_item.get("url")
+                    course_title = course_item.get("title", f"Curso {i}")
+                else:
+                    course_url = course_item
+                    course_title = f"Curso {i}"
+                
                 if self.cancel_requested:
                     logger.warning("❌ Downloads cancelados pelo usuário")
                     break
                 
                 logger.info("")
                 logger.info("=" * 70)
-                logger.info(f"📖 Processando curso {i}/{total_courses}")
+                logger.info(f"📖 Processando curso {i}/{total_courses}: {course_title}")
                 logger.info("=" * 70)
                 logger.info(f"🔗 URL: {course_url}")
                 logger.info("")

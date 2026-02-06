@@ -411,15 +411,35 @@ class CourseUrlManager:
     def _load_urls(self) -> list:
         """
         Carrega URLs do arquivo.
+        Suporta formato antigo (lista de strings) e novo (lista de dicts).
         
         Returns:
-            Lista de URLs
+            Lista de dicts [{'url': ..., 'title': ...}]
         """
         try:
             if self.URLS_FILE.exists():
                 with open(self.URLS_FILE, 'r', encoding='utf-8') as f:
-                    urls = json.load(f)
-                    logger.info(f"✓ {len(urls)} URL(s) de curso carregada(s)")
+                    data = json.load(f)
+                    
+                    # Migração automática v1 -> v2 (String -> Dict)
+                    urls = []
+                    has_changes = False
+                    
+                    for item in data:
+                        if isinstance(item, str):
+                            # Tenta extrair um título amigável da URL
+                            title = self._extract_title_from_url(item)
+                            urls.append({"url": item, "title": title})
+                            has_changes = True
+                        elif isinstance(item, dict):
+                            urls.append(item)
+                    
+                    if has_changes:
+                        logger.info("ℹ Migrando lista de cursos para novo formato com títulos")
+                        # Salva já migrado
+                        self._save_raw(urls)
+                        
+                    logger.info(f"✓ {len(urls)} curso(s) carregado(s)")
                     return urls
         
         except json.JSONDecodeError as e:
@@ -435,14 +455,17 @@ class CourseUrlManager:
     
     def save_urls(self) -> None:
         """Salva URLs no arquivo"""
+        self._save_raw(self.urls)
+
+    def _save_raw(self, data: list) -> None:
+        """Salva dados brutos no arquivo"""
         try:
             with open(self.URLS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.urls, f, indent=2, ensure_ascii=False)
-            logger.debug(f"✓ {len(self.urls)} URL(s) salva(s)")
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.debug(f"✓ {len(data)} curso(s) salvo(s)")
         
         except (OSError, IOError) as e:
             logger.error(f"❌ Erro ao salvar URLs: {e}")
-        
         except Exception as e:
             logger.error(f"❌ Erro inesperado ao salvar URLs: {e}", exc_info=True)
     
@@ -462,18 +485,24 @@ class CourseUrlManager:
             logger.warning(f"⚠ URL inválida: {url}")
             return False
         
-        if url in self.urls:
+        # Verifica duplicidade pela URL
+        if any(c['url'] == url for c in self.urls):
             logger.info("⚠ URL já existe na lista")
             return False
         
-        self.urls.append(url)
+        title = self._extract_title_from_url(url)
+        
+        self.urls.append({
+            "url": url,
+            "title": title
+        })
         self.save_urls()
-        logger.info(f"✓ URL adicionada: {url}")
+        logger.info(f"✓ Curso adicionado: {title}")
         return True
     
     def remove_url(self, url: str) -> bool:
         """
-        Remove URL da lista.
+        Remove curso pela URL.
         
         Args:
             url: URL a ser removida
@@ -481,29 +510,68 @@ class CourseUrlManager:
         Returns:
             True se removida com sucesso
         """
-        if url in self.urls:
-            self.urls.remove(url)
+        initial_len = len(self.urls)
+        self.urls = [c for c in self.urls if c['url'] != url]
+        
+        if len(self.urls) < initial_len:
             self.save_urls()
-            logger.info(f"✓ URL removida: {url}")
+            logger.info(f"✓ Curso removido: {url}")
             return True
         
-        logger.warning("⚠ URL não encontrada na lista")
+        logger.warning("⚠ Curso não encontrado na lista")
         return False
     
     def get_all(self) -> list:
         """
-        Retorna todas as URLs.
+        Retorna todos os cursos.
         
         Returns:
-            Cópia da lista de URLs
+            Cópia da lista de cursos (dicts)
         """
         return self.urls.copy()
     
     def clear(self) -> None:
-        """Remove todas as URLs"""
+        """Remove todos os cursos"""
         self.urls = []
         self.save_urls()
-        logger.info("✓ Lista de URLs limpa")
+        logger.info("✓ Lista de cursos limpa")
+
+    def _extract_title_from_url(self, url: str) -> str:
+        """Tenta extrair título legível da URL"""
+        try:
+            # Ex: .../cursos/curso-de-xy-z/aulas
+            # Pega 'curso-de-xy-z'
+            parts = url.split('/')
+            
+            # Remove vazios e pega segmentos relevantes
+            parts = [p for p in parts if p]
+            
+            slug = "Curso Desconhecido"
+            
+            # Procura segmento antes de 'aulas' ou o último relevante
+            if 'aulas' in parts:
+                idx = parts.index('aulas')
+                if idx > 0:
+                    slug = parts[idx-1]
+            else:
+                # Tenta pegar o último segmento que parece um slug
+                for p in reversed(parts):
+                    if '-' in p and len(p) > 5:
+                        slug = p
+                        break
+            
+            # Formata: 'curso-de-python-avancado' -> 'Curso De Python Avancado'
+            title = slug.replace('-', ' ').title()
+            
+            # Tira ID numérico do final se existir (comum em slugs)
+            # Ex: curso-python-1234 -> Curso Python
+            import re
+            title = re.sub(r'\s\d+$', '', title)
+            
+            return title
+            
+        except Exception:
+            return "Novo Curso (Título Pendente)"
     
     @staticmethod
     def _validate_url(url: str) -> bool:

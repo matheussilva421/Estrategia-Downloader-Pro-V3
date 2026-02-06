@@ -656,10 +656,10 @@ class StrategyDownloaderApp(ctk.CTk):
         for widget in self.courses_list.winfo_children():
             widget.destroy()
         
-        urls = self.url_manager.get_all()
-        self.stat_courses.configure(text=str(len(urls)))
+        courses = self.url_manager.get_all()
+        self.stat_courses.configure(text=str(len(courses)))
         
-        if not urls:
+        if not courses:
             empty_label = ctk.CTkLabel(
                 self.courses_list,
                 text="Nenhum curso adicionado ainda",
@@ -668,26 +668,54 @@ class StrategyDownloaderApp(ctk.CTk):
             empty_label.pack(pady=20)
             return
         
-        for url in urls:
-            self._create_course_item(url)
+        for course in courses:
+            self._create_course_item(course)
     
-    def _create_course_item(self, url):
-        """Cria item de curso"""
+    def _create_course_item(self, course_data):
+        """Cria item de curso visual (Card)"""
+        # Normaliza dados (suporta versão antiga str e nova dict)
+        if isinstance(course_data, dict):
+            url = course_data.get("url")
+            title = course_data.get("title", "Curso Desconhecido")
+        else:
+            url = course_data
+            title = url # Fallback para versão antiga
+            
         item = ctk.CTkFrame(self.courses_list, fg_color="#202020")
         item.pack(fill="x", padx=5, pady=5)
         
-        label = ctk.CTkLabel(
-            item,
-            text=url,
-            wraplength=800,
-            justify="left"
-        )
-        label.pack(side="left", padx=15, pady=10, fill="x", expand=True)
+        # Frame de textos (Título + URL)
+        text_frame = ctk.CTkFrame(item, fg_color="transparent")
+        text_frame.pack(side="left", padx=15, pady=8, fill="x", expand=True)
         
+        # Título
+        ctk.CTkLabel(
+            text_frame,
+            text=title,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="white",
+            anchor="w",
+            justify="left",
+            wraplength=650
+        ).pack(fill="x")
+        
+        # URL (discreto)
+        ctk.CTkLabel(
+            text_frame,
+            text=url,
+            font=ctk.CTkFont(size=11),
+            text_color="gray",
+            anchor="w",
+            justify="left",
+            wraplength=650
+        ).pack(fill="x")
+        
+        # Botão remover (agora mais compacto)
         remove_btn = ctk.CTkButton(
             item,
-            text="❌ Remover",
-            width=100,
+            text="❌",
+            width=40,
+            height=30,
             fg_color="#C62828",
             hover_color="#E53935",
             command=lambda: self._remove_course(url)
