@@ -919,16 +919,17 @@ class StrategyDownloaderApp(ctk.CTk):
         
         speed_str = f"{format_bytes(speed)}/s"
         
-        widgets["status_label"].configure(text=f"{size_str} - {speed_str}")
+        # Formatação mais limpa: Tamanho  •  Velocidade
+        widgets["status_label"].configure(text=f"{size_str}  •  {speed_str}")
         
         # Se completou (apenas se total > 0 para garantir)
         if total > 0 and current >= total:
-             widgets["status_label"].configure(text_color="#00E676") # Verde
+             widgets["status_label"].configure(text="Concluído  •  100%", text_color="#00E676")
              widgets["progress_bar"].stop()
-             widgets["progress_bar"].configure(mode="determinate")
+             widgets["progress_bar"].configure(mode="determinate", progress_color="#00E676")
              widgets["progress_bar"].set(1.0)
              
-             # ✅ NOVO: Remove item quando completo
+             # ✅ Remove item quando completo
              self.after(3000, lambda: self._remove_download_item(file_name))
 
     def _remove_download_item(self, file_name):
@@ -940,16 +941,8 @@ class StrategyDownloaderApp(ctk.CTk):
             except Exception as e:
                 pass
 
-    async def _create_download_item(self, file_name):
-        """Cria item na lista de downloads (Layout Compacto)"""
-        # Executa na thread principal se necessário
-        if threading.current_thread() is not threading.main_thread():
-             self.after(0, lambda: self._create_download_item_sync(file_name))
-        else:
-             self._create_download_item_sync(file_name)
-
-    def _create_download_item_sync(self, file_name):
-        """Implementação síncrona da criação do item"""
+    def _create_download_item(self, file_name):
+        """Cria item na lista de downloads (Layout Compacto - Síncrono)"""
         if file_name in self.active_downloads:
             return
 
@@ -999,6 +992,7 @@ class StrategyDownloaderApp(ctk.CTk):
             "progress_bar": progress,
             "status_label": status_label
         }
+
 
     def _log_message(self, message, tag="INFO"):
         """Adiciona mensagem no log com cor"""
