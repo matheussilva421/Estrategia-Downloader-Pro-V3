@@ -227,21 +227,45 @@ class StrategyDownloaderApp(ctk.CTk):
         return value_label
     
     def _create_settings_frame(self):
-        """Frame de configurações"""
-        frame = ctk.CTkScrollableFrame(self, label_text="⚙️ Configurações")
+        """Frame de configurações com Abas"""
+        # Cria container principal (não scrollable, pois as abas já gerenciam o espaço)
+        frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
         
+        # Título
+        title = ctk.CTkLabel(
+            frame, 
+            text="⚙️ Configurações", 
+            font=ctk.CTkFont(size=20, weight="bold")
+        )
+        title.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
+
+        # Container de Abas
+        self.settings_tabs = ctk.CTkTabview(frame, width=800, height=500)
+        self.settings_tabs.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="nsew")
+        
+        # Adiciona tabs
+        tab_geral = self.settings_tabs.add("Geral")
+        tab_video = self.settings_tabs.add("Vídeo")
+        tab_pdf = self.settings_tabs.add("PDF")
+        
+        # Configura grid das tabs
+        for tab in [tab_geral, tab_video, tab_pdf]:
+            tab.grid_columnconfigure(1, weight=1)
+
         self.settings_widgets = {}
         
-        # Seção: Credenciais
-        cred_section = self._create_section(frame, "🔐 Credenciais")
+        # === TAB GERAL ===
+        # Credenciais
+        cred_section = self._create_section(tab_geral, "🔐 Credenciais")
         self._add_setting(cred_section, "Email:", "email", 0)
         self._add_setting(cred_section, "Senha:", "senha", 1, widget_type="password")
         
-        # Seção: Geral
-        general_section = self._create_section(frame, "🎯 Configurações Gerais")
+        # Opções Gerais
+        gen_section = self._create_section(tab_geral, "🎯 Opções de Download")
         self._add_setting(
-            general_section,
+            gen_section,
             "Tipo de Download:",
             "downloadType",
             0,
@@ -249,48 +273,18 @@ class StrategyDownloaderApp(ctk.CTk):
             options=["pdf", "video"]
         )
         self._add_setting(
-            general_section,
+            gen_section,
             "Modo Invisível:",
             "headless",
             1,
             widget_type="switch"
         )
+
+        # === TAB VÍDEO ===
+        video_section = self._create_section(tab_video, "🎥 Preferências de Vídeo")
         
-        # Seção: PDFs
-        pdf_section = self._create_section(frame, "📄 Configurações de PDF")
-        self._add_folder_setting(pdf_section, "Pasta de PDFs:", "pdf_folder", 0)
-        self._add_setting(
-            pdf_section,
-            "Tipo de PDF:",
-            "pdfType",
-            1,
-            widget_type="combo",
-            options=["1: Simplificado", "2: Original", "3: Marcado", "4: Todos"],
-            config_path=("pdfConfig",)
-        )
-        
-        # ✅ NOVA CONFIGURAÇÃO: Baixar materiais dos vídeos junto com PDFs
-        self._add_setting(
-            pdf_section,
-            "Baixar Materiais Extras:",
-            "baixarMateriaisDeVideo",
-            2,
-            widget_type="switch",
-            config_path=("pdfConfig",)
-        )
-        
-        # Info sobre materiais dos vídeos
-        extras_pdf_info = ctk.CTkLabel(
-            pdf_section,
-            text="ℹ️  Inclui Mapas Mentais, Resumos e Slides das aulas em vídeo",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
-        )
-        extras_pdf_info.grid(row=4, column=1, padx=20, pady=(0, 12), sticky="w")
-        
-        # Seção: Vídeos
-        video_section = self._create_section(frame, "🎥 Configurações de Vídeo")
         self._add_folder_setting(video_section, "Pasta de Vídeos:", "video_folder", 0)
+        
         self._add_setting(
             video_section,
             "Resolução:",
@@ -301,7 +295,6 @@ class StrategyDownloaderApp(ctk.CTk):
             config_path=("videoConfig",)
         )
         
-        # ✅ NOVA CONFIGURAÇÃO: Baixar materiais extras
         self._add_setting(
             video_section,
             "Baixar Materiais Extras:",
@@ -311,27 +304,54 @@ class StrategyDownloaderApp(ctk.CTk):
             config_path=("videoConfig",)
         )
         
-        # Info sobre materiais extras
-        extras_info = ctk.CTkLabel(
+        ctk.CTkLabel(
             video_section,
-            text="ℹ️  Mapas Mentais, Resumos e Slides",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
-        )
-        extras_info.grid(row=4, column=1, padx=20, pady=(0, 12), sticky="w")
+            text="ℹ️  Inclui Mapas Mentais, Resumos e Slides",
+            font=ctk.CTkFont(size=11), text_color="gray"
+        ).grid(row=4, column=1, padx=20, pady=(0, 10), sticky="w")
+
+        # === TAB PDF ===
+        pdf_section = self._create_section(tab_pdf, "📄 Preferências de PDF")
         
-        # Botão salvar
+        self._add_folder_setting(pdf_section, "Pasta de PDFs:", "pdf_folder", 0)
+        
+        self._add_setting(
+            pdf_section,
+            "Tipo de PDF:",
+            "pdfType",
+            1,
+            widget_type="combo",
+            options=["1: Simplificado", "2: Original", "3: Marcado", "4: Todos"],
+            config_path=("pdfConfig",)
+        )
+        
+        self._add_setting(
+            pdf_section,
+            "Baixar Materiais Extras:",
+            "baixarMateriaisDeVideo",
+            2,
+            widget_type="switch",
+            config_path=("pdfConfig",)
+        )
+        
+        ctk.CTkLabel(
+            pdf_section,
+            text="ℹ️  Inclui materiais de vídeo junto com os PDFs",
+            font=ctk.CTkFont(size=11), text_color="gray"
+        ).grid(row=4, column=1, padx=20, pady=(0, 10), sticky="w")
+        
+        # Botão salvar (fora das tabs, no frame principal)
         save_btn = ctk.CTkButton(
             frame,
-            text="💾 SALVAR CONFIGURAÇÕES",
-            height=50,
-            width=300,
-            font=ctk.CTkFont(size=16, weight="bold"),
+            text="💾 SALVAR TUDO",
+            height=45,
+            width=200,
+            font=ctk.CTkFont(size=15, weight="bold"),
             fg_color="#1976D2",
             hover_color="#2196F3",
             command=self._save_settings
         )
-        save_btn.pack(pady=30)
+        save_btn.grid(row=2, column=0, pady=20)
         
         return frame
     
@@ -692,10 +712,13 @@ class StrategyDownloaderApp(ctk.CTk):
     
     def _remove_course(self, url):
         """Remove curso"""
-        if self.url_manager.remove_url(url):
-            self._load_courses()
-            self._update_stats()
-            self._log_message(f"✓ Curso removido")
+        # ✅ NOVO: Diálogo de confirmação para remover curso
+        import tkinter.messagebox as messagebox
+        if messagebox.askyesno("Remover Curso", f"Deseja remover este curso da lista?\n\n{url}"):
+            if self.url_manager.remove_url(url):
+                self._load_courses()
+                self._update_stats()
+                self._log_message(f"✓ Curso removido")
     
     def _start_download(self):
         """Inicia downloads"""
@@ -836,7 +859,7 @@ class StrategyDownloaderApp(ctk.CTk):
             tag = "SUCCESS"
         
         self._log_message(message, tag)
-
+    
     def _handle_progress_update(self, data):
         """Atualiza barra de progresso de um arquivo"""
         file_name = data.get("file")
