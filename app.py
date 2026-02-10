@@ -30,6 +30,11 @@ class StrategyDownloaderApp(ctk.CTk):
     MAX_UI_PROGRESS_RENDERS_PER_TICK = 30
     
     def __init__(self):
+        """
+        Initialize the main StrategyDownloaderApp window, create core managers and UI, set initial state for downloads and progress throttling, schedule log queue processing, and display the home frame.
+        
+        This sets window title, size and theme; instantiates ConfigManager and CourseUrlManager; creates the log queue; initializes download-related attributes and internal structures used to coalesce/throttle per-file progress updates; configures the grid layout and window close handler; builds the sidebar and content frames; starts periodic log processing; and shows the initial home screen.
+        """
         super().__init__()
         
         # Configurações da janela
@@ -756,7 +761,11 @@ class StrategyDownloaderApp(ctk.CTk):
                 self._log_message(f"✓ Curso removido")
     
     def _start_download(self):
-        """Inicia downloads"""
+        """
+        Start a new download session and initialize the UI and background worker.
+        
+        Validates that no download is already running and that there are courses to download; if validation passes, clears logs, resets progress display, updates UI state to downloading, shows the logs view, and starts the DownloadManager in a background thread. On failure to start the worker, logs an error and resets download state.
+        """
         if self._is_downloading:
             self._log_message("⚠ Um download já está em andamento")
             return
@@ -846,7 +855,11 @@ class StrategyDownloaderApp(ctk.CTk):
             logger.error(f"Erro ao atualizar estatísticas: {e}")
     
     def _process_log_queue(self):
-        """Processa fila de logs e status"""
+        """
+        Process queued log and progress events, render bounded UI updates, and reschedule the processor.
+        
+        Consumes up to the configured per-tick limits of log and progress events from self.log_queue. Log events are rendered immediately (via internal log handlers) and trigger a delayed call to _on_download_complete when a terminal message appears. Progress events are coalesced per file and flushed through _flush_pending_progress_updates to limit UI render frequency. The method schedules itself to run again after self.LOG_PROCESS_INTERVAL.
+        """
         try:
             progress_events = 0
             log_events = 0
@@ -893,7 +906,11 @@ class StrategyDownloaderApp(ctk.CTk):
             self.after(self.LOG_PROCESS_INTERVAL, self._process_log_queue)
 
     def _flush_pending_progress_updates(self):
-        """Renderiza progresso coalescido com throttle por arquivo."""
+        """
+        Flushes and renders coalesced per-file progress updates to the UI, subject to throttling.
+        
+        Processes pending progress updates for individual files and calls _handle_progress_update for each file selected for render. Each file is rendered at most once per PROGRESS_RENDER_INTERVAL_MS, processed entries are removed from the pending queue, and at most MAX_UI_PROGRESS_RENDERS_PER_TICK files are rendered in a single call. If there are no pending updates, the method returns immediately.
+        """
         if not self._pending_progress_updates:
             return
 
@@ -919,7 +936,15 @@ class StrategyDownloaderApp(ctk.CTk):
                 break
     
     def _handle_log_message(self, data):
-        """Processa mensagem de log colorida"""
+        """
+        Classifies a log entry and sends it to the UI log area with an appropriate tag.
+        
+        Parameters:
+            data (dict): Log record expected to contain at least:
+                - "level" (str): log level like "INFO", "WARNING", or "ERROR".
+                - "message" (str): the log text; messages containing "sucesso" or "concluído"
+                  (case-insensitive) are classified as `SUCCESS`.
+        """
         level = data.get("level", "INFO")
         message = data.get("message", "")
         
@@ -978,7 +1003,16 @@ class StrategyDownloaderApp(ctk.CTk):
              self.after(3000, lambda: self._remove_download_item(file_name))
 
     def _remove_download_item(self, file_name):
-        """Remove item da lista de downloads"""
+        """
+        Remove a download item and its associated UI and progress-tracking state.
+        
+        Deletes the item's frame from the downloads list UI, removes its entry from
+        self.active_downloads, and clears any pending progress updates and last-render
+        timestamps for the given file.
+        
+        Parameters:
+            file_name (str): The name or key identifying the download item to remove.
+        """
         if file_name in self.active_downloads:
             try:
                 self.active_downloads[file_name]["frame"].destroy()
@@ -1058,7 +1092,11 @@ class StrategyDownloaderApp(ctk.CTk):
             logger.error(f"Erro ao adicionar log: {e}")
     
     def _clear_logs(self):
-        """Limpa área de logs e downloads"""
+        """
+        Clear the UI log area and reset download-related UI state.
+        
+        This clears the log text widget, removes all download item widgets from the downloads list, and resets internal download tracking state by clearing `active_downloads`, `_pending_progress_updates`, and `_last_progress_render_times`.
+        """
         try:
             self.log_text.configure(state="normal")
             self.log_text.delete("1.0", "end")

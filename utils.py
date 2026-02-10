@@ -89,16 +89,18 @@ async def download_file(
     progress_callback=None  # ✅ Callback de progresso
 ) -> None:
     """
-    Faz download de arquivo com retries e backoff exponencial.
+    Download a file from a URL to the given path, using retries with exponential backoff and atomic finalization.
     
-    Args:
-        url: URL do arquivo
-        file_path: Caminho onde salvar o arquivo
-        logger: Logger para mensagens
-        retries: Número de tentativas
-        chunk_size: Tamanho dos chunks de download
-        timeout: Timeout total em segundos
-        progress_callback: Função chamada com (downloaded_bytes, total_bytes, speed)
+    Downloads into a temporary file (same path with a .tmp suffix) and replaces the target path on success; ensures the destination directory exists. Retries on network, timeout, or OS errors (with exponential backoff); raises an Exception after exhausting retries. Propagates asyncio.CancelledError if the coroutine is cancelled.
+    
+    Parameters:
+        url (str): Source URL of the file.
+        file_path (Path): Destination file path.
+        logger (logging.Logger): Logger used for informational and error messages.
+        retries (int): Maximum number of attempts (default 3).
+        chunk_size (int): Size in bytes of each read chunk (default 8192).
+        timeout (int): Total request timeout in seconds (default 300). Connection and socket read use smaller guarded timeouts.
+        progress_callback (callable|None): Optional function called as progress_callback(downloaded_bytes, total_bytes, speed_bytes_per_sec) approximately every 1 second and on completion.
     """
     import time
     
@@ -278,11 +280,12 @@ class QueueHandler(logging.Handler):
         compact_mode: bool = False
     ):
         """
-        Inicializa o handler.
+        Initialize the QueueHandler which forwards structured log records to a queue.
         
-        Args:
-            log_queue: Fila para enviar mensagens
-            max_queue_size: Tamanho máximo da fila
+        Parameters:
+            log_queue (queue.Queue): Destination queue for emitted log records.
+            max_queue_size (int): Maximum number of items allowed in the queue before messages are considered dropped.
+            compact_mode (bool): When True, the handler will filter out non-essential records and enqueue only important or high-severity entries.
         """
         super().__init__()
         self.log_queue = log_queue
@@ -291,7 +294,15 @@ class QueueHandler(logging.Handler):
         self.compact_mode = compact_mode
     
     def _should_emit(self, record: logging.LogRecord) -> bool:
-        """Determina se um log deve ser enviado para a UI no modo compacto."""
+        """
+        Decide whether a log record should be forwarded to the UI when compact logging is enabled.
+        
+        Parameters:
+            record (logging.LogRecord): Log record to evaluate.
+        
+        Returns:
+            `True` if the record should be emitted to the UI, `False` otherwise.
+        """
         if not self.compact_mode:
             return True
 
@@ -314,10 +325,12 @@ class QueueHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         """
-        Emite log para a fila de forma não-bloqueante.
+        Emit the log record to the configured queue in a non-blocking, structured form.
         
-        Args:
-            record: Registro de log
+        If the record should not be emitted (per _should_emit), the method returns immediately. Otherwise the record is formatted into a structured dictionary and put into the queue using a non-blocking call. When the queue is full, `dropped_messages` is incremented; every 100 dropped messages the handler attempts to free some space and enqueue an alert about the number of discarded messages. Any other unexpected exception is delegated to `handleError`.
+         
+        Parameters:
+            record (logging.LogRecord): The log record to emit.
         """
         try:
             if not self._should_emit(record):
@@ -392,16 +405,16 @@ def setup_logger(
     compact_logs: bool = False
 ) -> logging.Logger:
     """
-    Configura logger com formatação e handlers apropriados.
+    Configure and return a logger with a rotating file handler and an optional queue handler, using a standardized timestamped formatter.
     
-    Args:
-        name: Nome do logger
-        log_queue: Fila para enviar mensagens (opcional)
-        level: Nível de log
-        compact_logs: Se True, reduz logs enviados para interface
+    Parameters:
+        name (str): Logger name.
+        log_queue (Optional[queue.Queue]): If provided, attach a QueueHandler that will forward structured log records to this queue.
+        level (int): Logging level to set on the logger.
+        compact_logs (bool): If True, the queue handler (when attached) will filter non-essential messages to reduce UI noise.
     
     Returns:
-        Logger configurado
+        logging.Logger: Configured logger instance (may already be configured and returned unchanged if handlers exist).
     """
     logger = logging.getLogger(name)
     

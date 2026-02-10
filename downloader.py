@@ -25,12 +25,12 @@ class DownloadManager:
     
     def __init__(self, config_manager: ConfigManager, log_queue=None, compact_logs: bool = False):
         """
-        Inicializa o gerenciador de downloads.
+        Initialize the DownloadManager with configuration and optional UI logging controls.
         
-        Args:
-            config_manager: Gerenciador de configurações
-            log_queue: Fila para enviar logs para interface (opcional)
-            compact_logs: Reduz logs de rotina enviados para UI
+        Parameters:
+            config_manager (ConfigManager): Configuration provider used by the manager.
+            log_queue (optional): Queue or sink to forward log records to a user interface.
+            compact_logs (bool): If True, reduce routine/verbose log messages sent to the UI.
         """
         self.config = config_manager
         self.progress = ProgressManager()
