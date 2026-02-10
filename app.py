@@ -8,6 +8,7 @@ from customtkinter import filedialog
 import asyncio
 import threading
 import queue
+import time
 from pathlib import Path
 import sys
 import logging
@@ -21,8 +22,14 @@ logger = logging.getLogger(__name__)
 class StrategyDownloaderApp(ctk.CTk):
     """Aplicação principal com interface gráfica moderna"""
     
-    LOG_PROCESS_INTERVAL = 100  # ms
-    MAX_LOG_LINES = 1000        # Máximo de linhas no log
+    LOG_PROCESS_INTERVAL = 100       # ms (durante download)
+    LOG_PROCESS_INTERVAL_IDLE = 500  # ms (quando ocioso)
+    MAX_LOG_LINES = 500              # Máximo de linhas no log
+    PROGRESS_THROTTLE_MS = 200       # Mínimo entre updates por arquivo
+    AUTO_REMOVE_DELAY = 2000         # ms para remover item concluído
+    MAX_PROGRESS_EVENTS_PER_TICK = 60
+    MAX_LOG_EVENTS_PER_TICK = 12
+    MAX_UI_PROGRESS_RENDERS_PER_TICK = 20
     
     def __init__(self):
         super().__init__()
@@ -44,6 +51,9 @@ class StrategyDownloaderApp(ctk.CTk):
         self.download_thread = None
         
         self._is_downloading = False
+        self._pending_progress_updates = {}
+        self._last_progress_render_times = {}
+        self._last_progress_update = {}
         
         # Configuração do grid
         self.grid_columnconfigure(1, weight=1)
@@ -782,7 +792,11 @@ class StrategyDownloaderApp(ctk.CTk):
         
         # Inicia thread
         try:
-            self.download_manager = DownloadManager(self.config_manager, self.log_queue)
+            self.download_manager = DownloadManager(
+                self.config_manager,
+                self.log_queue,
+                compact_logs=True
+            )
             self.download_thread = threading.Thread(
                 target=self._run_download_async,
                 daemon=True
@@ -837,42 +851,93 @@ class StrategyDownloaderApp(ctk.CTk):
     def _process_log_queue(self):
         """Processa fila de logs e status"""
         try:
-            processed = 0
-            max_process = 20  # Aumentado para processar mais updates
+            progress_events = 0
+            log_events = 0
             
-            while processed < max_process:
+            while True:
                 try:
                     data = self.log_queue.get_nowait()
                     
                     if isinstance(data, dict):
                         msg_type = data.get("type")
                         
-                        if msg_type == "log":
+                        if msg_type == "progress":
+                            if progress_events >= self.MAX_PROGRESS_EVENTS_PER_TICK:
+                                break
+                            self._pending_progress_updates[data.get("file")] = data
+                            progress_events += 1
+
+                        elif msg_type == "log":
+                            if log_events >= self.MAX_LOG_EVENTS_PER_TICK:
+                                break
                             self._handle_log_message(data)
+                            log_events += 1
                             
                             # Verifica fim de processo pelo texto
                             message = data.get("message", "")
                             if "FINALIZADO" in message or "PROCESSO CANCELADO" in message:
                                 self.after(500, self._on_download_complete)
-                                
-                        elif msg_type == "progress":
-                            self._handle_progress_update(data)
                             
                     else:
                         # Fallback para string antiga
-                        self._log_message(str(data))
-                        
-                    processed += 1
+                        if log_events < self.MAX_LOG_EVENTS_PER_TICK:
+                            self._log_message(str(data))
+                            log_events += 1
                 
                 except queue.Empty:
                     break
+
+            self._flush_pending_progress_updates()
         
         except Exception as e:
             logger.error(f"Erro ao processar fila de logs: {e}")
         
         finally:
-            self.after(self.LOG_PROCESS_INTERVAL, self._process_log_queue)
+            interval = self.LOG_PROCESS_INTERVAL if self._is_downloading else self.LOG_PROCESS_INTERVAL_IDLE
+            self.after(interval, self._process_log_queue)
+
+    def _flush_pending_progress_updates(self):
+        """Renderiza progresso coalescido com throttle por arquivo."""
+        if not self._pending_progress_updates:
+            return
+
+        now = time.monotonic()
+        min_interval = self.PROGRESS_THROTTLE_MS / 1000.0
+        rendered = 0
+
+        for file_name, data in list(self._pending_progress_updates.items()):
+            if not file_name:
+                self._pending_progress_updates.pop(file_name, None)
+                continue
+
+            last_render = self._last_progress_render_times.get(file_name, 0)
+            if now - last_render < min_interval:
+                continue
+            if not self._should_update_progress(file_name):
+                continue
+
+            self._handle_progress_update(data)
+            self._last_progress_render_times[file_name] = now
+            self._pending_progress_updates.pop(file_name, None)
+            rendered += 1
+
+            if rendered >= self.MAX_UI_PROGRESS_RENDERS_PER_TICK:
+                break
     
+    def _should_update_progress(self, file_name: str) -> bool:
+        """Define se um arquivo pode ser renderizado agora (throttle)."""
+        if not file_name:
+            return False
+
+        current_time = time.time() * 1000
+        last_update = self._last_progress_update.get(file_name, 0)
+
+        if (current_time - last_update) >= self.PROGRESS_THROTTLE_MS:
+            self._last_progress_update[file_name] = current_time
+            return True
+
+        return False
+
     def _handle_log_message(self, data):
         """Processa mensagem de log colorida"""
         level = data.get("level", "INFO")
@@ -930,7 +995,7 @@ class StrategyDownloaderApp(ctk.CTk):
              widgets["progress_bar"].set(1.0)
              
              # ✅ Remove item quando completo
-             self.after(3000, lambda: self._remove_download_item(file_name))
+             self.after(self.AUTO_REMOVE_DELAY, lambda: self._remove_download_item(file_name))
 
     def _remove_download_item(self, file_name):
         """Remove item da lista de downloads"""
@@ -938,6 +1003,9 @@ class StrategyDownloaderApp(ctk.CTk):
             try:
                 self.active_downloads[file_name]["frame"].destroy()
                 del self.active_downloads[file_name]
+                self._pending_progress_updates.pop(file_name, None)
+                self._last_progress_render_times.pop(file_name, None)
+                self._last_progress_update.pop(file_name, None)
             except Exception as e:
                 pass
 
@@ -1002,7 +1070,8 @@ class StrategyDownloaderApp(ctk.CTk):
             
             lines = int(self.log_text.index('end-1c').split('.')[0])
             if lines > self.MAX_LOG_LINES:
-                self.log_text.delete("1.0", f"{lines - self.MAX_LOG_LINES}.0")
+                delete_count = min(100, lines - self.MAX_LOG_LINES + 50)
+                self.log_text.delete("1.0", f"{delete_count}.0")
             
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
@@ -1021,6 +1090,9 @@ class StrategyDownloaderApp(ctk.CTk):
             for widget in self.downloads_list.winfo_children():
                 widget.destroy()
             self.active_downloads.clear()
+            self._pending_progress_updates.clear()
+            self._last_progress_render_times.clear()
+            self._last_progress_update.clear()
             
         except Exception as e:
             logger.error(f"Erro ao limpar logs: {e}")
