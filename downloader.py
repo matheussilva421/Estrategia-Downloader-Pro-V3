@@ -23,13 +23,14 @@ class DownloadManager:
     
     BROWSER_TIMEOUT = 30000  # ms
     
-    def __init__(self, config_manager: ConfigManager, log_queue=None):
+    def __init__(self, config_manager: ConfigManager, log_queue=None, compact_logs: bool = False):
         """
         Inicializa o gerenciador de downloads.
         
         Args:
             config_manager: Gerenciador de configurações
             log_queue: Fila para enviar logs para interface (opcional)
+            compact_logs: Reduz logs de rotina enviados para UI
         """
         self.config = config_manager
         self.progress = ProgressManager()
@@ -41,7 +42,7 @@ class DownloadManager:
         
         # Configura logger
         global logger
-        logger = setup_logger(__name__, log_queue)
+        logger = setup_logger(__name__, log_queue, compact_logs=compact_logs)
         
         # Redireciona print para logger
         sys.stdout = PrintRedirector(logger)

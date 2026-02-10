@@ -144,7 +144,7 @@ async def download_file(
                                 
                                 # Atualiza progresso
                                 current_time = time.time()
-                                if progress_callback and (current_time - last_update > 0.5 or downloaded == total_size):
+                                if progress_callback and (current_time - last_update > 1.0 or downloaded == total_size):
                                     elapsed = current_time - start_time
                                     speed = downloaded / elapsed if elapsed > 0 else 0
                                     progress_callback(downloaded, total_size, speed)
@@ -271,7 +271,12 @@ class QueueHandler(logging.Handler):
     Handler de log que envia mensagens para uma fila de forma não-bloqueante
     """
     
-    def __init__(self, log_queue: queue.Queue, max_queue_size: int = 1000):
+    def __init__(
+        self,
+        log_queue: queue.Queue,
+        max_queue_size: int = 1000,
+        compact_mode: bool = False
+    ):
         """
         Inicializa o handler.
         
@@ -283,7 +288,30 @@ class QueueHandler(logging.Handler):
         self.log_queue = log_queue
         self.max_queue_size = max_queue_size
         self.dropped_messages = 0
+        self.compact_mode = compact_mode
     
+    def _should_emit(self, record: logging.LogRecord) -> bool:
+        """Determina se um log deve ser enviado para a UI no modo compacto."""
+        if not self.compact_mode:
+            return True
+
+        if record.levelno >= logging.WARNING:
+            return True
+
+        msg = record.getMessage().upper()
+        important_markers = (
+            "INICIANDO",
+            "FINALIZADO",
+            "RELATÓRIO",
+            "PROCESSANDO CURSO",
+            "HEALTH CHECK",
+            "AUTENTICA",
+            "CANCELADO",
+            "CONCLU",
+            "FALH",
+        )
+        return any(marker in msg for marker in important_markers)
+
     def emit(self, record: logging.LogRecord) -> None:
         """
         Emite log para a fila de forma não-bloqueante.
@@ -292,6 +320,9 @@ class QueueHandler(logging.Handler):
             record: Registro de log
         """
         try:
+            if not self._should_emit(record):
+                return
+
             # ✅ CORREÇÃO: Envia dicionário estruturado ao invés de string simples
             log_entry = {
                 "type": "log",
@@ -357,7 +388,8 @@ class PrintRedirector:
 def setup_logger(
     name: str,
     log_queue: Optional[queue.Queue] = None,
-    level: int = logging.INFO
+    level: int = logging.INFO,
+    compact_logs: bool = False
 ) -> logging.Logger:
     """
     Configura logger com formatação e handlers apropriados.
@@ -366,6 +398,7 @@ def setup_logger(
         name: Nome do logger
         log_queue: Fila para enviar mensagens (opcional)
         level: Nível de log
+        compact_logs: Se True, reduz logs enviados para interface
     
     Returns:
         Logger configurado
@@ -405,7 +438,7 @@ def setup_logger(
     
     # Handler para fila (se fornecido)
     if log_queue:
-        queue_handler = QueueHandler(log_queue)
+        queue_handler = QueueHandler(log_queue, compact_mode=compact_logs)
         queue_handler.setFormatter(formatter)
         logger.addHandler(queue_handler)
     
