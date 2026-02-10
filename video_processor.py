@@ -40,7 +40,8 @@ class VideoProcessor(BaseCourseProcessor):
         preferred_resolution: str = '720p',
         download_extras: bool = True,  # ✅ NOVO: Flag para baixar materiais extras
         skip_video: bool = False,      # ✅ NOVO: Se True, não baixa vídeo (apenas extras)
-        log_queue=None                 # ✅ Passa fila de logs
+        log_queue=None,                # ✅ Passa fila de logs
+        session=None                   # ✅ Sessão compartilhada
     ):
         """
         Inicializa o processador de vídeos.
@@ -52,8 +53,9 @@ class VideoProcessor(BaseCourseProcessor):
             download_extras: Se True, baixa também mapas mentais e resumos
             skip_video: Se True, apenas navega e baixa extras, ignorando o arquivo de vídeo
             log_queue: Fila para enviar status
+            session: Sessão aiohttp compartilhada
         """
-        super().__init__(base_dir, progress_manager, log_queue)
+        super().__init__(base_dir, progress_manager, log_queue, session)
         
         if preferred_resolution not in self.AVAILABLE_RESOLUTIONS:
             logger.warning(
@@ -263,7 +265,8 @@ class VideoProcessor(BaseCourseProcessor):
                         video_url,
                         file_path,
                         logger,
-                        progress_callback=progress_callback
+                        progress_callback=progress_callback,
+                        session=self.session
                     )
                     
                     await verify_download(
@@ -425,7 +428,8 @@ class VideoProcessor(BaseCourseProcessor):
                 mapa_url,
                 file_path,
                 logger,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                session=self.session
             )
             
             # ✅ VALIDAÇÃO MELHORADA: Verifica se não é HTML de erro
@@ -517,7 +521,8 @@ class VideoProcessor(BaseCourseProcessor):
                 resumo_url,
                 file_path,
                 logger,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                session=self.session
             )
             
             # ✅ VALIDAÇÃO MELHORADA
@@ -608,7 +613,8 @@ class VideoProcessor(BaseCourseProcessor):
                 slides_url,
                 file_path,
                 logger,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                session=self.session
             )
             
             # ✅ VALIDAÇÃO MELHORADA
@@ -741,6 +747,18 @@ class VideoProcessor(BaseCourseProcessor):
         
         try:
             timeout_config = aiohttp.ClientTimeout(total=10, connect=5)
+            
+            # Se já temos uma sessão, usamos ela (mas precisamos cuidar do timeout específico)
+            # Como a sessão já tem timeout e connector, podemos tentar usar
+            if self.session:
+                 try:
+                    async with self.session.get(forced_url, timeout=timeout_config) as resp:
+                        if resp.status == 200:
+                            logger.info(f"✓ Forçado para {resolution}p com sucesso")
+                            return forced_url
+                 except Exception:
+                     pass # Fallback para criar nova sessão se falhar
+
             connector = aiohttp.TCPConnector(limit_per_host=2)
             
             async with aiohttp.ClientSession(

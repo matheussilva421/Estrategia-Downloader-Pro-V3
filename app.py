@@ -835,58 +835,92 @@ class StrategyDownloaderApp(ctk.CTk):
             logger.error(f"Erro ao atualizar estatísticas: {e}")
     
     def _process_log_queue(self):
-        """Processa fila de logs e status"""
+        """Processa fila de logs e status em lotes (Batch Processing)"""
         try:
-            processed = 0
-            max_process = 20  # Aumentado para processar mais updates
+            # Limites para evitar travamento
+            max_batch_size = 100
+            processed_count = 0
             
-            while processed < max_process:
+            # Coletores de lote
+            log_batch = []
+            progress_batch = {}  # file_name -> data (mantém apenas o mais recente)
+            
+            # Esvazia a fila até o limite do lote
+            while processed_count < max_batch_size:
                 try:
                     data = self.log_queue.get_nowait()
+                    processed_count += 1
                     
                     if isinstance(data, dict):
                         msg_type = data.get("type")
                         
                         if msg_type == "log":
-                            self._handle_log_message(data)
-                            
-                            # Verifica fim de processo pelo texto
-                            message = data.get("message", "")
-                            if "FINALIZADO" in message or "PROCESSO CANCELADO" in message:
-                                self.after(500, self._on_download_complete)
-                                
+                            log_batch.append(data)
                         elif msg_type == "progress":
-                            self._handle_progress_update(data)
-                            
+                            # Sobrescreve com o mais recente para este arquivo
+                            file_name = data.get("file")
+                            if file_name:
+                                progress_batch[file_name] = data
                     else:
-                        # Fallback para string antiga
-                        self._log_message(str(data))
-                        
-                    processed += 1
-                
+                        # Fallback para string antiga (trata como log)
+                        log_batch.append({"type": "log", "message": str(data), "level": "INFO"})
+
                 except queue.Empty:
                     break
-        
+            
+            # --- PROCESSA BATCH DE LOGS ---
+            if log_batch:
+                self._handle_log_batch(log_batch)
+            
+            # --- PROCESSA BATCH DE PROGRESSO ---
+            if progress_batch:
+                for file_name, data in progress_batch.items():
+                    self._handle_progress_update(data)
+            
         except Exception as e:
             logger.error(f"Erro ao processar fila de logs: {e}")
         
         finally:
-            self.after(self.LOG_PROCESS_INTERVAL, self._process_log_queue)
-    
-    def _handle_log_message(self, data):
-        """Processa mensagem de log colorida"""
-        level = data.get("level", "INFO")
-        message = data.get("message", "")
-        
-        tag = "INFO"
-        if level == "ERROR":
-            tag = "ERROR"
-        elif level == "WARNING":
-            tag = "WARNING"
-        elif "sucesso" in message.lower() or "concluído" in message.lower():
-            tag = "SUCCESS"
-        
-        self._log_message(message, tag)
+            # Reageda o processamento
+            # Se processou o lote cheio, agenda para logo (10ms) para drenar a fila
+            # Se a fila estava vazia, aguarda o intervalo padrão
+            delay = 10 if processed_count >= max_batch_size else self.LOG_PROCESS_INTERVAL
+            self.after(delay, self._process_log_queue)
+
+    def _handle_log_batch(self, batch):
+        """Insere múltiplos logs de uma vez só"""
+        try:
+            self.log_text.configure(state="normal")
+            
+            for data in batch:
+                level = data.get("level", "INFO")
+                message = data.get("message", "")
+                
+                # Define tag
+                tag = "INFO"
+                if level == "ERROR":
+                    tag = "ERROR"
+                elif level == "WARNING":
+                    tag = "WARNING"
+                elif "sucesso" in message.lower() or "concluído" in message.lower():
+                    tag = "SUCCESS"
+                
+                self.log_text.insert("end", message + "\n", tag)
+                
+                # Verifica fim de processo
+                if "FINALIZADO" in message or "PROCESSO CANCELADO" in message:
+                    self.after(500, self._on_download_complete)
+
+            # Scroll e limpeza (apenas uma vez por batch)
+            lines = int(self.log_text.index('end-1c').split('.')[0])
+            if lines > self.MAX_LOG_LINES:
+                self.log_text.delete("1.0", f"{lines - self.MAX_LOG_LINES}.0")
+            
+            self.log_text.see("end")
+            self.log_text.configure(state="disabled")
+            
+        except Exception as e:
+            logger.error(f"Erro ao inserir logs em batch: {e}")
     
     def _handle_progress_update(self, data):
         """Atualiza barra de progresso de um arquivo"""

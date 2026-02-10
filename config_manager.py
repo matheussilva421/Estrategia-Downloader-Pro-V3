@@ -76,7 +76,8 @@ class ConfigManager:
         
         except json.JSONDecodeError as e:
             logger.error(f"❌ Arquivo de configuração corrompido: {e}")
-            logger.info("⚠ Usando configurações padrão")
+            self._backup_and_repair_config()
+            return self._get_default_config()
         
         except (OSError, IOError) as e:
             logger.error(f"❌ Erro ao ler arquivo de configuração: {e}")
@@ -86,6 +87,26 @@ class ConfigManager:
             logger.critical(f"❌ Erro inesperado ao carregar config: {e}", exc_info=True)
         
         return self._get_default_config()
+
+    def _backup_and_repair_config(self) -> None:
+        """Faz backup do arquivo corrompido e restaura o padrão"""
+        try:
+            if self.CONFIG_FILE.exists():
+                # Gera nome de backup único com timestamp
+                import time
+                timestamp = int(time.time())
+                backup_path = self.CONFIG_FILE.with_suffix(f'.json.{timestamp}.bak')
+                
+                self.CONFIG_FILE.rename(backup_path)
+                logger.warning(f"⚠ Arquivo corrompido salvo como: {backup_path.name}")
+                
+            # Salva configuração padrão
+            self.config = self._get_default_config()
+            self.save_config()
+            logger.info("✓ Arquivo de configuração restaurado para o padrão")
+            
+        except Exception as e:
+            logger.error(f"❌ Falha ao tentar reparar configuração: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """

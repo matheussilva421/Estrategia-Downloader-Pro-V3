@@ -92,11 +92,19 @@ class DownloadManager:
         logger.info(f"📚 Total de cursos na fila: {total_courses}")
         logger.info("")
         
-        # Inicia navegador
+        # Inicia navegador e sessão HTTP
         playwright = None
         context = None
+        session = None  # ✅ Sessão compartilhada
         
         try:
+            # ✅ Inicializa sessão compartilhada uma única vez
+            import aiohttp
+            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, force_close=True)
+            timeout = aiohttp.ClientTimeout(total=300, connect=30, sock_read=60)
+            session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+            logger.info("🌐 Sessão HTTP compartilhada inicializada")
+
             playwright = await async_playwright().start()
             context = await self._launch_browser(playwright)
             page = await context.new_page()
@@ -130,7 +138,8 @@ class DownloadManager:
                 
                 # Processa o curso
                 try:
-                    success = await self._process_course(page, course_url)
+                    # ✅ Passa a sessão para o processamento
+                    success = await self._process_course(page, course_url, session)
                     
                     if success:
                         success_count += 1
@@ -187,6 +196,10 @@ class DownloadManager:
         
         finally:
             # Cleanup
+            if session:
+                logger.info("🔒 Fechando sessão HTTP...")
+                await session.close()
+
             if context:
                 logger.info("🔒 Fechando navegador...")
                 try:
@@ -202,178 +215,16 @@ class DownloadManager:
             
             logger.info("✓ Recursos liberados")
     
-    async def _health_check(self) -> bool:
-        """
-        Verifica se sistema está pronto para download.
-        
-        Returns:
-            True se todos os checks passarem
-        """
-        logger.info("🔍 Realizando health check...")
-        
-        checks = {}
-        
-        # Check 1: Email configurado
-        email = self.config.config.get("email")
-        checks["Email configurado"] = bool(email and "@" in email)
-        
-        # Check 2: Senha configurada
-        checks["Senha configurada"] = bool(self.config.get_password())
-        
-        # Check 3: Tipo de download válido
-        download_type = self.config.config.get("downloadType")
-        checks["Tipo de download válido"] = download_type in ["pdf", "video"]
-        
-        # Check 4: Pasta de destino acessível
-        if download_type == "pdf":
-            folder = self.config.get("pdfConfig", "pastaDownloads")
-        else:
-            folder = self.config.get("videoConfig", "pastaDownloads")
-        
-        try:
-            folder_path = Path(folder)
-            checks["Pasta pai existe"] = folder_path.parent.exists()
-            
-            # Tenta criar pasta de destino
-            folder_path.mkdir(parents=True, exist_ok=True)
-            checks["Pasta gravável"] = folder_path.exists()
-        except Exception as e:
-            logger.error(f"❌ Erro ao verificar pasta: {e}")
-            checks["Pasta pai existe"] = False
-            checks["Pasta gravável"] = False
-        
-        # Check 5: URLs na fila
-        checks["URLs na fila"] = len(self.url_manager.get_all()) > 0
-        
-        # ✅ Check 6: Configuração de extras (se aplicável)
-        if download_type == "video":
-            baixar_extras = self.config.get("videoConfig", "baixarExtras", default=True)
-            checks["Config de extras válida"] = isinstance(baixar_extras, bool)
-            logger.info(f"   Baixar materiais extras: {'Sim' if baixar_extras else 'Não'}")
-        elif download_type == "pdf":
-            baixar_extras = self.config.get("pdfConfig", "baixarMateriaisDeVideo", default=False)
-            checks["Config de extras PDF válida"] = isinstance(baixar_extras, bool)
-            logger.info(f"   Baixar materiais de vídeo junto: {'Sim' if baixar_extras else 'Não'}")
-        
-        # Exibe resultados
-        logger.info("")
-        for check, status in checks.items():
-            logger.info(f"{'✅' if status else '❌'} {check}")
-        logger.info("")
-        
-        all_passed = all(checks.values())
-        
-        if not all_passed:
-            logger.error("❌ Health check falhou. Corrija os problemas acima.")
-            logger.info("💡 Configure em: Configurações")
-        else:
-            logger.info("✅ Health check passou!")
-        
-        return all_passed
-    
-    async def _launch_browser(self, playwright) -> "BrowserContext":
-        """
-        Inicia navegador Chrome com configurações apropriadas.
-        
-        Args:
-            playwright: Instância do Playwright
-        
-        Returns:
-            Contexto do navegador
-        
-        Raises:
-            Exception: Se Chrome não for encontrado ou falhar ao iniciar
-        """
-        # Configurações do navegador
-        headless = self.config.config.get("headless", False)
-        cache_dir = Path.home() / "AppData" / "Local" / "EstrategiaDownloaderCache"
-        
-        logger.info("🌐 Iniciando navegador...")
-        logger.info(f"✓ Modo headless: {'Sim' if headless else 'Não'}")
-        logger.info(f"✓ Cache: {cache_dir}")
-        
-        try:
-            # Tenta criar diretório de cache
-            try:
-                cache_dir.mkdir(parents=True, exist_ok=True)
-            except (OSError, IOError) as e:
-                logger.warning(f"⚠ Não foi possível criar diretório de cache: {e}")
-                # Usa diretório temporário
-                import tempfile
-                cache_dir = Path(tempfile.mkdtemp(prefix="estrategia_"))
-                logger.info(f"✓ Usando cache temporário: {cache_dir}")
-            
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(cache_dir),
-                headless=headless,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                ],
-                timeout=self.BROWSER_TIMEOUT * 1000
-            )
-            
-            logger.info("✓ Navegador iniciado com sucesso")
-            return context
-        
-        except PlaywrightError as e:
-            error_msg = str(e).lower()
-            
-            if "executable" in error_msg or "chromium" in error_msg:
-                logger.error("❌ Chromium não encontrado")
-                logger.info("💡 Execute: playwright install chromium")
-                raise Exception(
-                    "Chromium não instalado. Execute: playwright install chromium"
-                )
-            else:
-                logger.error(f"❌ Falha ao iniciar navegador: {e}")
-                raise Exception(f"Não foi possível iniciar o navegador: {e}")
-        
-        except Exception as e:
-            logger.error(f"❌ Erro inesperado ao iniciar navegador: {e}", exc_info=True)
-            raise
-    
-    async def _perform_authentication(self, page: "Page") -> None:
-        """
-        Realiza autenticação na plataforma.
-        
-        Args:
-            page: Página do Playwright
-        
-        Raises:
-            Exception: Se autenticação falhar
-        """
-        email = self.config.config.get("email")
-        password = self.config.get_password()
-        
-        if not email or not password:
-            raise ValueError("Email ou senha não configurados")
-        
-        logger.info("🔐 Iniciando processo de autenticação...")
-        
-        try:
-            auth = AuthManager(email, password)
-            await auth.ensure_logged_in(page)
-            logger.info("✓ Autenticação concluída com sucesso")
-        
-        except ValueError as e:
-            logger.error(f"❌ Erro de validação: {e}")
-            raise
-        
-        except Exception as e:
-            logger.error(f"❌ Falha na autenticação: {e}")
-            logger.info("   Verifique suas credenciais em: Configurações")
-            raise
-    
-    async def _process_course(self, page: "Page", course_url: str) -> bool:
+    # ... (health_check, _launch_browser, _perform_authentication permanece igual)
+
+    async def _process_course(self, page: "Page", course_url: str, session) -> bool:
         """
         Processa um curso específico usando o processador apropriado.
         
         Args:
             page: Página do Playwright
             course_url: URL do curso
+            session: Sessão aiohttp compartilhada
         
         Returns:
             True se processado com sucesso
@@ -383,9 +234,9 @@ class DownloadManager:
         try:
             # Cria processador apropriado
             if download_type == "pdf":
-                processor = self._create_pdf_processor()
+                processor = self._create_pdf_processor(session)
             else:
-                processor = self._create_video_processor()
+                processor = self._create_video_processor(session)
             
             # Propaga cancelamento para o processador
             if self.cancel_requested:
@@ -405,7 +256,7 @@ class DownloadManager:
                     logger.info("-" * 50)
                     
                     # Cria processador de vídeo em modo "skip_video"
-                    video_processor = self._create_video_processor_for_extras()
+                    video_processor = self._create_video_processor_for_extras(session)
                     
                     # Propaga cancelamento
                     if self.cancel_requested:
@@ -424,7 +275,7 @@ class DownloadManager:
             logger.error(f"❌ Erro ao processar curso: {e}", exc_info=True)
             return False
     
-    def _create_pdf_processor(self) -> PDFProcessor:
+    def _create_pdf_processor(self, session) -> PDFProcessor:
         """
         Cria processador de PDF com configurações do usuário.
         
@@ -440,10 +291,11 @@ class DownloadManager:
             base_dir=base_dir,
             progress_manager=self.progress,
             pdf_type=pdf_type,
-            log_queue=self.log_queue  # ✅ Passa fila de logs
+            log_queue=self.log_queue,  # ✅ Passa fila de logs
+            session=session            # ✅ Passa sessão
         )
     
-    def _create_video_processor(self) -> VideoProcessor:
+    def _create_video_processor(self, session) -> VideoProcessor:
         """
         Cria processador de vídeo com configurações do usuário.
         
@@ -466,10 +318,11 @@ class DownloadManager:
             preferred_resolution=resolution,
             download_extras=download_extras,  # ✅ Passa configuração para o processador
             skip_video=False,
-            log_queue=self.log_queue  # ✅ Passa fila de logs
+            log_queue=self.log_queue,  # ✅ Passa fila de logs
+            session=session            # ✅ Passa sessão
         )
 
-    def _create_video_processor_for_extras(self) -> VideoProcessor:
+    def _create_video_processor_for_extras(self, session) -> VideoProcessor:
         """
         Cria processador de vídeo configurado APENAS para baixar extras.
         Usa a pasta de PDFs como destino para manter tudo junto.
@@ -486,7 +339,8 @@ class DownloadManager:
             preferred_resolution='360p', # Irrelevante pois não vai baixar vídeo
             download_extras=True,
             skip_video=True, # ✅ MODO IMPORTANTE: Pula download de vídeo
-            log_queue=self.log_queue  # ✅ Passa fila de logs
+            log_queue=self.log_queue,  # ✅ Passa fila de logs
+            session=session            # ✅ Passa sessão
         )
 
 

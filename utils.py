@@ -86,7 +86,8 @@ async def download_file(
     retries: int = 3,
     chunk_size: int = 8192,
     timeout: int = 300,
-    progress_callback=None  # ✅ Callback de progresso
+    progress_callback=None,  # ✅ Callback de progresso
+    session: Optional[aiohttp.ClientSession] = None  # ✅ Sessão compartilhada opcional
 ) -> None:
     """
     Faz download de arquivo com retries e backoff exponencial.
@@ -99,6 +100,7 @@ async def download_file(
         chunk_size: Tamanho dos chunks de download
         timeout: Timeout total em segundos
         progress_callback: Função chamada com (downloaded_bytes, total_bytes, speed)
+        session: Sessão aiohttp compartilhada (opcional)
     """
     import time
     
@@ -114,17 +116,9 @@ async def download_file(
                 sock_read=60     # Timeout de leitura do socket
             )
             
-            # ✅ CORREÇÃO: Connector com limite de conexões
-            connector = aiohttp.TCPConnector(
-                limit_per_host=5,
-                force_close=True
-            )
-            
-            async with aiohttp.ClientSession(
-                connector=connector,
-                timeout=timeout_config
-            ) as session:
-                async with session.get(url) as response:
+            # Função interna para usar sessão existente ou criar nova
+            async def _do_download(client_session):
+                async with client_session.get(url, timeout=timeout_config) as response:
                     if response.status != 200:
                         raise Exception(f"Status HTTP inválido: {response.status}")
                     
@@ -158,6 +152,19 @@ async def download_file(
                         if temp_path.exists():
                             temp_path.unlink()
                         raise e
+
+            if session:
+                # Usa sessão compartilhada
+                await _do_download(session)
+            else:
+                # Cria nova sessão (comportamento antigo)
+                # ✅ CORREÇÃO: Connector com limite de conexões
+                connector = aiohttp.TCPConnector(
+                    limit_per_host=5,
+                    force_close=True
+                )
+                async with aiohttp.ClientSession(connector=connector) as new_session:
+                    await _do_download(new_session)
             
             logger.info(f"✓ Baixado: {file_path.name}")
             return

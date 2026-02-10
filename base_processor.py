@@ -28,7 +28,7 @@ class BaseCourseProcessor:
     RATE_LIMIT_DELAY = 0.5              # segundos entre downloads
     MAX_CONCURRENT_DOWNLOADS = 3        # downloads simultâneos
     
-    def __init__(self, base_dir: Path, progress_manager, log_queue=None):
+    def __init__(self, base_dir: Path, progress_manager, log_queue=None, session=None):
         """
         Inicializa o processador base.
         
@@ -36,10 +36,12 @@ class BaseCourseProcessor:
             base_dir: Diretório base para downloads
             progress_manager: Gerenciador de progresso
             log_queue: Fila para enviar logs e status
+            session: Sessão aiohttp compartilhada
         """
         self.base_dir = Path(base_dir)
         self.progress_manager = progress_manager
         self.log_queue = log_queue
+        self.session = session
         
         # ✅ CORREÇÃO: asyncio.Event ao invés de bool para thread-safety
         self._cancel_event = asyncio.Event()

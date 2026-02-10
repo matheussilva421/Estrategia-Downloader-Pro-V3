@@ -21,7 +21,7 @@ class PDFProcessor(BaseCourseProcessor):
         3: {'name': 'marcação dos aprovados', 'urlPart': 'pdfGrifado/download'}
     }
     
-    def __init__(self, base_dir: Path, progress_manager, pdf_type: int = 2, log_queue=None):
+    def __init__(self, base_dir: Path, progress_manager, pdf_type: int = 2, log_queue=None, session=None):
         """
         Inicializa o processador de PDFs.
         
@@ -30,8 +30,9 @@ class PDFProcessor(BaseCourseProcessor):
             progress_manager: Gerenciador de progresso
             pdf_type: Tipo de PDF a baixar (1-4)
             log_queue: Fila para enviar status
+            session: Sessão aiohttp compartilhada
         """
-        super().__init__(base_dir, progress_manager, log_queue)
+        super().__init__(base_dir, progress_manager, log_queue, session)
         
         # ✅ VALIDAÇÃO: Garante que pdf_type é válido
         if pdf_type not in [1, 2, 3, 4]:
@@ -230,7 +231,8 @@ class PDFProcessor(BaseCourseProcessor):
                         pdf_url,
                         file_path,
                         logger,
-                        progress_callback=progress_callback
+                        progress_callback=progress_callback,
+                        session=self.session
                     )
                     
                     # ✅ VALIDAÇÃO EXTRA: Verifica se não é HTML de erro

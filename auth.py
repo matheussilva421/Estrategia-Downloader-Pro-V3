@@ -95,6 +95,7 @@ class AuthManager:
     async def _is_logged_in(self, page: Page) -> bool:
         """
         Verifica se já está logado procurando por elementos da dashboard.
+        Otimizado para falhar rápido se não estiver logado.
         
         Args:
             page: Página do Playwright
@@ -103,9 +104,17 @@ class AuthManager:
             True se já está logado
         """
         try:
+            # Verifica existência do elemento com timeout curto
+            # Se encontrar o botão de login, sabemos que NÃO estamos logados
+            login_btn = page.locator('input[name="loginField"]')
+            if await login_btn.count() > 0 and await login_btn.is_visible():
+                return False
+                
+            # Se não tem botão de login, procura indicador de sucesso
             await page.wait_for_selector(
                 'a:has-text("Catálogo de Cursos")',
-                timeout=5000
+                state='attached',
+                timeout=3000  # Timeout reduzido para check rápido
             )
             return True
         
@@ -154,29 +163,31 @@ class AuthManager:
             await page.click('button[type="submit"]')
             logger.info("✓ Formulário enviado")
             
-            # Aguarda confirmação de login bem-sucedido
+            # Aguarda confirmação de login (ou erro)
             logger.debug("Aguardando confirmação de login...")
-            await page.wait_for_selector(
-                'a:has-text("Catálogo de Cursos")',
-                timeout=self.LOGIN_CONFIRM_TIMEOUT
-            )
-            logger.info("✓ Login confirmado")
-        
-        # ✅ CORREÇÃO: Tratamento de erro mais específico
-        except PlaywrightTimeoutError as e:
-            logger.error(f"❌ Timeout durante login: {e}")
             
-            # ✅ MELHORIA: Verifica se há mensagem de erro na página
             try:
-                error_message = await page.locator('.error, .alert-danger').text_content()
-                if error_message:
-                    raise Exception(f"Erro de login: {error_message}")
-            except:
-                pass
-            
+                # Race condition: ou loga com sucesso ou aparece erro
+                # Precisamos verificar ambos
+                await page.wait_for_selector(
+                    'a:has-text("Catálogo de Cursos")',
+                    timeout=self.LOGIN_CONFIRM_TIMEOUT
+                )
+                logger.info("✓ Login confirmado")
+                
+            except PlaywrightTimeoutError:
+                # Se deu timeout no sucesso, verifica se tem erro na tela
+                error_element = page.locator('.error, .alert-danger, div[class*="error"]')
+                if await error_element.count() > 0:
+                     msg = await error_element.first.text_content()
+                     raise Exception(f"Erro da plataforma: {msg.strip()}")
+                
+                raise Exception("Timeout aguardando confirmação de login")
+        
+        except PlaywrightTimeoutError as e:
+            logger.error(f"❌ Timeout durante interação de login: {e}")
             raise Exception(
-                "Timeout durante o processo de login. "
-                "Verifique suas credenciais e tente novamente."
+                "Interface de login não carregou corretamente ou está lenta."
             )
         
         except Exception as e:
