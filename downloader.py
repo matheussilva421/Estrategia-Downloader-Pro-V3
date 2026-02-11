@@ -215,7 +215,48 @@ class DownloadManager:
             
             logger.info("✓ Recursos liberados")
     
-    # ... (health_check, _launch_browser, _perform_authentication permanece igual)
+    async def _health_check(self) -> bool:
+        """Verifica integridade do ambiente antes de iniciar"""
+        try:
+            # Valida configurações
+            is_valid, errors = self.config.validate()
+            if not is_valid:
+                for msg in errors:
+                    logger.error(f"❌ Configuração inválida: {msg}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Falha no health check: {e}")
+            return False
+
+    async def _launch_browser(self, playwright):
+        """Inicializa navegador"""
+        headless = self.config.config.get("headless", False)
+        logger.info(f"🌐 Iniciando navegador (headless={headless})...")
+        
+        browser = await playwright.chromium.launch(
+            headless=headless,
+            args=['--start-maximized', '--disable-infobars']
+        )
+        
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        return context
+
+    async def _perform_authentication(self, page):
+        """Realiza login na plataforma"""
+        email = self.config.config.get("email")
+        password = self.config.get_password()
+        
+        if not email or not password:
+            raise ValueError("Credenciais não configuradas")
+            
+        auth = AuthManager(email, password)
+        await auth.ensure_logged_in(page)
 
     async def _process_course(self, page: "Page", course_url: str, session) -> bool:
         """
